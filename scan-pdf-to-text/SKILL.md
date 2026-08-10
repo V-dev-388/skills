@@ -10,6 +10,8 @@ agent_created: true
 
 把不含文本层的扫描版 PDF（图片型 PDF）识别转换为结构化文字。识别结果按原书页码标注，供引用与核对使用。
 
+> 以下命令均在 skill 根目录（SKILL.md 所在目录）下执行，脚本位于 `scripts/` 子目录。
+
 **工具优先级（硬约束）**：`agent 内置工具 > macOS 原生工具 > 第三方库`
 
 - **识别（读图、OCR）**：一律用 agent 内置的多模态读取工具（Read / file_view），直接对渲染出的 JPG 识别，不调用 macOS 原生 OCR（如 Vision）做主力识别。
@@ -23,8 +25,8 @@ agent_created: true
 先编译并运行文本层检测脚本：
 
 ```bash
-cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O pdf_text_layer.swift -o pdf_text_layer
-~/.workbuddy/skills/scan-pdf-to-text/scripts/pdf_text_layer <输入.pdf>
+cd scripts && swiftc -O pdf_text_layer.swift -o pdf_text_layer
+./pdf_text_layer <输入.pdf>
 ```
 
 - 输出 `HAS_TEXT_LAYER pages=N chars=M` 并附全文 → 直接使用提取的文本，跳到步骤 4（整理格式）。
@@ -35,8 +37,8 @@ cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O pdf_text_layer.swif
 ### 步骤 2：渲染每页为 JPG
 
 ```bash
-cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O render_pdf_pages.swift -o render_pdf_pages
-~/.workbuddy/skills/scan-pdf-to-text/scripts/render_pdf_pages <输入.pdf> <输出目录> [scale] [quality]
+cd scripts && swiftc -O render_pdf_pages.swift -o render_pdf_pages
+./render_pdf_pages <输入.pdf> <输出目录> [scale] [quality]
 ```
 
 - scale 默认 2.0（中文印刷体约 2000px 宽，识别足够清晰）；字小或页面密可调 2.5–3.0。
@@ -62,11 +64,11 @@ cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O render_pdf_pages.sw
 操作流程：
 
 ```bash
-cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O crop_region.swift -o crop_region
+cd scripts && swiftc -O crop_region.swift -o crop_region
 # 比例模式（推荐，先整体浏览定位到疑问文字的大致位置）
-~/.workbuddy/skills/scan-pdf-to-text/scripts/crop_region <整页.jpg> <局部.jpg> --ratio 0.25 0.30 0.75 0.50 [scale]
+./crop_region <整页.jpg> <局部.jpg> --ratio 0.25 0.30 0.75 0.50 [scale]
 # 像素模式（知道精确像素位置时用）
-~/.workbuddy/skills/scan-pdf-to-text/scripts/crop_region <整页.jpg> <局部.jpg> <x> <y> <w> <h> [scale]
+./crop_region <整页.jpg> <局部.jpg> <x> <y> <w> <h> [scale]
 ```
 
 - 坐标统一为**视觉坐标**（左上角原点，与 Read 工具看到的位置一致）；比例模式 0.0-1.0，左上 (0,0) 右下 (1,1)。

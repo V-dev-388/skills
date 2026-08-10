@@ -10,6 +10,8 @@ agent_created: true
 
 核对一个 PDF 与一个 Markdown 文件的文字内容是否一致，输出逐项核对结论。若 PDF 是扫描版（无文本层），先按 scan-pdf-to-text 的流程识别文字，再与 MD 对比。重点核对正文、标题、页码标注、脚注四类内容。
 
+> 以下命令在 skill 根目录（SKILL.md 所在目录）下执行；`scan-pdf-to-text` 需与本 skill 位于同一父目录（本仓库内即如此），脚本位于其 `scripts/` 子目录。
+
 **工具优先级（硬约束）**：`agent 内置工具 > macOS 原生工具 > 第三方库`
 
 - 识别图片一律用 agent 内置多模态读取工具（Read / file_view），不做主力 OCR 调 macOS 原生框架。
@@ -23,8 +25,8 @@ agent_created: true
 编译并运行 scan-pdf-to-text 自带的检测脚本：
 
 ```bash
-cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O pdf_text_layer.swift -o pdf_text_layer
-~/.workbuddy/skills/scan-pdf-to-text/scripts/pdf_text_layer <待核对.pdf>
+cd ../scan-pdf-to-text/scripts && swiftc -O pdf_text_layer.swift -o pdf_text_layer
+./pdf_text_layer <待核对.pdf>
 ```
 
 - `HAS_TEXT_LAYER` → 直接用提取文本作为 PDF 侧基准（注意提取乱码时仍按扫描版处理）。
