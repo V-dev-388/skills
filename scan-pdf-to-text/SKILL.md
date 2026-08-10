@@ -1,0 +1,89 @@
+---
+name: scan-pdf-to-text
+description: 将扫描版 PDF（无文本层的图片型 PDF）识别转换为文字。当用户需要把图片 PDF/扫描件转成文字、提取扫描 PDF 内容、将 PDF 转为可复制的文本或 md 时使用。触发词：扫描版 pdf、图片 pdf、pdf 转文字、pdf 识别、pdf 转 md、pdf 提取文字、pdf 文字化。也用于 pdf-md-verify 等其他 skill 的前置文字提取步骤。
+agent_created: true
+---
+
+# 图片 PDF 转文字（Scan PDF to Text）
+
+## Overview
+
+把不含文本层的扫描版 PDF（图片型 PDF）识别转换为结构化文字。识别结果按原书页码标注，供引用与核对使用。
+
+**工具优先级（硬约束）**：`agent 内置工具 > macOS 原生工具 > 第三方库`
+
+- **识别（读图、OCR）**：一律用 agent 内置的多模态读取工具（Read / file_view），直接对渲染出的 JPG 识别，不调用 macOS 原生 OCR（如 Vision）做主力识别。
+- **图像处理（渲染、裁剪、格式转换）**：用 macOS 原生工具（Swift + PDFKit / AppKit，本 skill 自带脚本）。
+- **第三方库**（pymupdf 等）：禁止为一次性任务安装。
+
+## 工作流
+
+### 步骤 1：检测 PDF 是否含文本层
+
+先编译并运行文本层检测脚本：
+
+```bash
+cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O pdf_text_layer.swift -o pdf_text_layer
+~/.workbuddy/skills/scan-pdf-to-text/scripts/pdf_text_layer <输入.pdf>
+```
+
+- 输出 `HAS_TEXT_LAYER pages=N chars=M` 并附全文 → 直接使用提取的文本，跳到步骤 4（整理格式）。
+- 输出 `NO_TEXT_LAYER pages=N` → 纯扫描版，继续步骤 2。
+
+> 经验：扫描件通常无文本层；若文本层提取结果为空、乱码或每页只有页眉，按扫描版处理（渲染图片识别往往更准）。
+
+### 步骤 2：渲染每页为 JPG
+
+```bash
+cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O render_pdf_pages.swift -o render_pdf_pages
+~/.workbuddy/skills/scan-pdf-to-text/scripts/render_pdf_pages <输入.pdf> <输出目录> [scale] [quality]
+```
+
+- scale 默认 2.0（中文印刷体约 2000px 宽，识别足够清晰）；字小或页面密可调 2.5–3.0。
+- quality 为 JPG 压缩质量（0.0–1.0），默认 0.9，文字识别建议不低于 0.85。
+- 产物为 `<输出目录>/page_01.jpg`、`page_02.jpg` … 依次对应 PDF 页序（JPG 体积约为 PNG 的 1/10，读写更快）。
+
+### 步骤 3：多模态逐页识别
+
+用 Read 工具逐页读取渲染出的 JPG（每页一张图，模型会自动识别图中文字）：
+
+1. 逐页读取，注意识别：正文、段落间换行、**页面侧边或页眉的原书页码**（如 `(448)`）、页脚注释/脚注编号。
+2. 一次并行读取 3–4 页为宜；单页大图识别效果稳定，勿压缩尺寸。
+3. 识别时把每页归属的原书页码记下来，作为后续引用锚点。
+
+### 步骤 3.5：局部裁剪精识别（拯救方案，借鉴 DeepSeek OCR 的局部高分辨率识别思路）
+
+整页识别遇到以下情况时，**不要反复整页重试**，改为裁剪疑问区域单独识别：
+
+- 整页图片过大（如渲染后超 3000px 或体积超大），单次识别上下文紧张、读取慢；
+- 某区域字迹模糊、小字号、密集排版，整页识别结果不清或存疑；
+- 需要核实某个具体词、数字、专名的写法。
+
+操作流程：
+
+```bash
+cd ~/.workbuddy/skills/scan-pdf-to-text/scripts && swiftc -O crop_region.swift -o crop_region
+# 比例模式（推荐，先整体浏览定位到疑问文字的大致位置）
+~/.workbuddy/skills/scan-pdf-to-text/scripts/crop_region <整页.jpg> <局部.jpg> --ratio 0.25 0.30 0.75 0.50 [scale]
+# 像素模式（知道精确像素位置时用）
+~/.workbuddy/skills/scan-pdf-to-text/scripts/crop_region <整页.jpg> <局部.jpg> <x> <y> <w> <h> [scale]
+```
+
+- 坐标统一为**视觉坐标**（左上角原点，与 Read 工具看到的位置一致）；比例模式 0.0-1.0，左上 (0,0) 右下 (1,1)。
+- 裁剪出的局部块默认放大 2 倍（scale 可调 3.0-4.0），输出 JPG 质量 0.95，体积小、识别快。
+- 裁剪后仅 Read 局部图，把该区域的准确文字补回整体识别结果中。
+
+### 步骤 4：整理输出
+
+- 若原 PDF 有页眉页脚（如书名、栏目名），默认剔除页眉，保留正文与侧边原书页码。
+- 页码标注：正文内按原书页码用圆括号标注，如 `(448)`；注明"此页码为原书页码"。
+- 脚注编号（①②…）与脚注内容一一对应，脚注放文末集中列出。
+- 无法辨认的字、疑似 OCR 错误，用 `[待核]` 标记，不要擅自补字。
+- 识别过程/产物目录属于中间状态，完成后向用户确认是否清理（默认保留脚本、清理 JPG 由用户决定）。
+
+## 注意事项
+
+- 本 skill 不适用于已有文本层的 PDF（有文本层直接提取即可，步骤 1 会分流）。
+- 识别准确度依赖 agent 内置多模态读取工具；若某页字迹模糊，优先用步骤 3.5 裁剪局部放大识别，而不是整体重试。
+- 局部裁剪的坐标是视觉坐标（左上原点），与页面渲染尺寸无关，比例模式最省心。
+- 工具优先级：识别用 agent 内置工具（Read/file_view），图像处理用 macOS 原生（Swift），不装第三方库。
